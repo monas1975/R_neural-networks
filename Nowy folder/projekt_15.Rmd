@@ -1,0 +1,216 @@
+---
+title: "Untitled"
+output: html_document
+---
+
+
+## Instalacja
+1. Library installation
+```{r install, eval=FALSE, include=TRUE}
+
+install.packages('keras')
+```
+
+2.Ladowanie bibliotek
+```{r load_keras, message=FALSE, warning=FALSE}
+library(keras)
+library(dplyr, quietly = TRUE, warn.conflicts = FALSE)
+library(ggplot2, quietly = TRUE, warn.conflicts = FALSE)
+```
+
+```{r install_tf, eval = FALSE, include = TRUE}
+install_keras()
+```
+
+## fashion_mnist dataset - zbiór danych przygotowany przez Zelando, zbiro treningowy ma 60000 obserwacji, zbior testowy 10000 obserwacj
+
+#Wczytywanie danych
+
+```{r load_data}
+fashion <- dataset_fashion_mnist()
+# zestaw uczacy
+c(x_train, y_train) %<-% fashion$train
+# zestaw testowy
+c(x_test, y_test) %<-% fashion$test
+
+#wektor z etykietami 
+class_names = c('T-shirt/top',
+                'Trouser',
+                'Pullover',
+                'Dress',
+                'Coat', 
+                'Sandal',
+                'Shirt',
+                'Sneaker',
+                'Bag',
+                'Ankle boot')
+
+dim(x_train)
+dim(y_train)
+
+```
+
+## Wizualizacja pierwszych 25 elementow
+
+```{r, visualize_digits}
+par(mfcol=c(5,5))
+par(mar=c(0,0,3,0), xaxs='i',yaxs='i')
+for (i in 1:25){
+  im <-x_train[i,,]
+  im<-t(apply(im, 2, rev))
+  image(1:28, 1:28, im, col=gray((255:0)/255),
+        xaxt ='n', main = paste(class_names[y_train[i]+1]))
+}
+```
+
+##Data preparation
+
+```{r x_data_prepare}
+# Reshape
+# zamiana rozmiaru tablicy 3-wymiarowej na 2 wymiarowa
+x_train <- array_reshape(x_train, c(nrow(x_train),28*28))
+x_test <- array_reshape(x_test, c(nrow(x_test),28*28))
+dim(x_train)
+head(x_train, 1) # wyswietlam tablice po zmianie rozmiaru
+#przeskalowanie - przechodzimy ze skali szarosci w rgb 0-255, do wartosci z zakresu 0-1. Normalizacja min-max
+x_train <- x_train /255
+x_test <- x_test /255
+
+head(x_train, 1) # wyswietlam 1 element "przeskalowanej" tablicy
+```
+
+
+```{r y_data_prepare}
+# Zmieniamy etykiety liczbowe na wektory "onehot", które odpowiadają warstwie wyjsciowej naszego modelu. Dane wyjsciowe z sieci będą miały 10 wezłów, co odpowiada zdefiniowantm zdefiniowanym kategoriom produkótw (\obrazów).Funkcja to_categorical ustawia 1 dla najbardziej prawdopodobnej kategori, zas 0 da pozostalych. Czyli etykiety (10 elementów), zamieniamy na wektor 10 elementowy, w których każda współrzedna odpowiada danej klasie, i tak np dla klasy 5 ('Coat') mamy array array[[0.,0.,0.,0.,1.,0.,0.,0.,0.,0.]]
+y_train <- to_categorical(y_train, 10)
+y_test <- to_categorical(y_test, 10)
+y_train[0]
+```
+
+## pierwsze 25 elementow z zestawu uczacego
+```{r}
+head(y_train, 25)
+```
+
+## definiowanie modelu
+
+```{r model}
+## dense - standardowa warstwa sieci neuronowej, w ktorej kazdy neuron jest połaczony z każdym neuronem nastepnej warstwy.
+## dropout - warstwa, która zapobiega "Overfittingowi"- nadmiernemu dopasowaniu sieci neuronowej do danych traningowych. Gdy pojawia sie overfitting, ## to mamy bardzo dobre wyniki w zbiorach  treningowych, zas w zbiorze testowym te wyniki są znacznie gorsze. Dropoutw każdym cyklu uczenia ignoruje ## ## losowo wybrane neurony.
+## model tworzymy podając kolejno warsty sieci neuronowe, w tym przypadku ograniczam sie do 4 warst typu Dense, które sa rozdzielone warstwami Dropout.
+## kazda warstwa ma swoja funkcje aktywujaca, ostatnia warstwa musi miec funkcje aktywująca odpowiednią do typu zadania. Gdy do czynienia mamy z ## ## ## regresja liniowa, to ostatnia warstwa powinna miec funkcje aktywujaca liniowa -"linear". Kesli mamy do czynienia z klasyfikacja binarną (kategori A ## lub B) to funkcją aktywujacą powinna byc funkcja "sigmod". Natomiast gdy mamy do czynienia z klasyfikacją wielowarstwową (tak jak w naszym 
+## przypadku, przypisywanie obrzka do jednej z 10 klas), wówczas uzywamy funkcji "softmax". Funkcja "softmax" zwróci nam liste prawdopodobieństw 
+## przynależności próbki do danej klasy.  
+## Pierwsza warstwa musi zostać poinformowana o kształcie wektora wejsciowego: input_shape = 28*28, jest to wymóg biblioteki Keras.
+## ilośc warst oraz wielkość wektórów wyjściowych z każdej warsty śa dowolne, ale dla ostatnij warstwy musimy przyjąć: dla regresji - 1 , dla klasyfikacji binarnej 2, zas dla wielkoklasowej n. a w naszym przypadku to jest unit =10 (10 klas do których będziemy przypisywać obserwacje)
+
+
+model <- keras_model_sequential()
+model %>%
+  layer_dense(units =256, activation = 'relu',input_shape = 28*28) %>%
+  layer_dropout(rate = 0.3) %>%
+  layer_dense(units=128,activation = 'relu') %>%
+  layer_dropout(rate = 0.2) %>%
+  layer_dense(units = 10, activation = 'softmax')
+```
+
+
+### Podsumowanie stworzonego modelu
+```{r model_summary}
+summary(model)
+```
+
+
+### kompilacja modelu
+
+```{r model_compile}
+model %>% compile(
+  loss = 'categorical_crossentropy',
+  optimizer = optimizer_adam(),
+  metrics = 'accuracy'
+)
+```
+
+### uczenie
+
+```{r}
+#wywołanie metody fit rozpoczyna proces uczenia sieci neuronowej. Na wejściu podany zostaje przygotowany zbiór treningowy: x_train. Poniewaz, mamy do # #czynienia z uczeniem nadzowrowanym to podajemy również parametr y_train. 
+# epochs (epoki) - określa ile razy zbór treningowy=, zostanie wykorzystany w procesie uczenia.
+#batch okresla jak często dokonujemy aktualizacji.
+
+model %>% fit(x_train,
+              y_train,
+              epochs = 5000,
+              batch_size = 128,
+              validation_split = 0.2
+              )-> model_dnn
+plot(model_dnn)
+```
+
+### ewaluacja modelu
+
+```{r}
+model %>% evaluate(x_train, y_train) # Ocena skuteczności modelu na danych treningowych
+model %>% evaluate(x_test, y_test) # Ocena skuteczności modelu na danych testowych
+```
+
+### predykcja
+
+
+```{r}
+##metdoa prediction zwarac tablice prawdopodobieństw, do której klasy należu dana obserwacja.
+model %>% predict(x_test) -> predictions # Prawdopodobienstwa dla danych testowych
+model %>% predict_classes(x_test) -> predicted_digits # najbardziej prawdopodobna klasa
+
+print(predictions)
+```
+
+
+### wizualizacja predykcji
+```{r}
+
+## Na czerwono zaznaczono błednie rozpoznane obrazki
+
+
+par(mfcol = c(5, 5))
+par(mar = c(0, 0, 1.5, 0), xaxs = 'i', yaxs = 'i')
+for (i in 1:25) { 
+  img <- fashion$test$x[i, , ]
+  img <- t(apply(img, 2, rev))
+  if (predicted_digits[i] == fashion$test$y[i]) {
+    color <- '#008800' 
+  } else {
+    color <- '#bb0000'
+  }
+  image(1:28, 1:28, img, col = gray((255:0) / 255), xaxt = 'n', yaxt = 'n',
+        main = paste0(class_names[predicted_digits[i]+1], ' (',
+                      class_names[fashion$test$y[i]+1], ')'),
+        col.main = color)
+}
+```
+
+### Macierz pomyłek
+### Oś X - "przewidywania\prediction"
+### Oś Y - "odniesnieni \ kategorie wzorcowe"
+```{r}
+data.frame(table(predicted_digits, fashion$test$y)) %>% 
+  setNames(c('Prediction', 'Reference', 'Freq')) %>% 
+  mutate(GoodBad = ifelse(Prediction == Reference, 'Correct', 'Incorrect')) -> conf_table
+
+conf_table %>% 
+  ggplot(aes(y = Reference, x = Prediction, fill = GoodBad, alpha = Freq)) + 
+  geom_tile() +
+  geom_text(aes(label = Freq), vjust = 0.5, fontface  = 'bold', alpha = 1) + 
+  scale_fill_manual(values = c(Correct = 'green', Incorrect = 'red')) +
+  guides(alpha = FALSE) + 
+  theme_bw() + 
+  ylim(rev(levels(conf_table$Reference)))
+```
+### przekatna wykresy, zaznaczona na zielono opisuje prawidłowe rozpoznaie kategori.
+### najczesciej błednie rozpoznawana kategoria jest "T-shirt\top"(kat. 0) mylona  z "shirt" -kat. 6 z    (114)
+
+
+### train: loss: loss: 0.1669 - accuracy: 0.9737
+### test: loss: 0.3039 - accuracy: 0.8992
+
+
